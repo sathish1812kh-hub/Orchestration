@@ -43,6 +43,12 @@ import { AntigravityConnector } from './antigravityConnector';
 import { ConnectorValidator } from './connectorValidator';
 import { InteractiveProcessConnector } from './ipcr';
 import { GenericCliAiConnector, GcacProfile } from './gcac';
+import {
+  CLAUDE_CODE_PROFILE,
+  negotiateCapabilities,
+  validateVersionCompatibility,
+  discoverClaudeCodePath
+} from './claudeProfile';
 
 // 1. Initialize Components
 const config = loadConfiguration();
@@ -1864,6 +1870,49 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             prompt: { type: 'string' }
           },
           required: ['profile', 'prompt']
+        }
+      },
+      {
+        name: 'claude_profile_status',
+        description: 'Query status layout and paths discovery status for the Claude Code Profile',
+        inputSchema: { type: 'object', properties: {} }
+      },
+      {
+        name: 'claude_detect_version',
+        description: 'Check a candidate version string against compatibility policies',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            versionString: { type: 'string' }
+          },
+          required: ['versionString']
+        }
+      },
+      {
+        name: 'claude_capabilities',
+        description: 'Negotiate dynamically enabled capabilities based on the detected Claude Code CLI version',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            versionString: { type: 'string' }
+          },
+          required: ['versionString']
+        }
+      },
+      {
+        name: 'claude_session_status',
+        description: 'Query connection variables and logs for the active Claude session',
+        inputSchema: { type: 'object', properties: {} }
+      },
+      {
+        name: 'claude_profile_validate',
+        description: 'Execute checks verifying directory scopes and settings parameters for the Claude Profile config',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            profilePath: { type: 'string' }
+          },
+          required: ['profilePath']
         }
       }
     ]
@@ -3857,6 +3906,58 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               streamed: streamText
             }, null, 2)
           }]
+        };
+      }
+
+      case 'claude_profile_status': {
+        const pathFound = discoverClaudeCodePath();
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              loaded: gcacConnector.getProfile()?.name === 'claude-code',
+              discoveredPath: pathFound,
+              isCompatible: true
+            }, null, 2)
+          }]
+        };
+      }
+
+      case 'claude_detect_version': {
+        const ver = args.versionString as string;
+        const comp = validateVersionCompatibility(ver);
+        return {
+          content: [{ type: 'text', text: JSON.stringify(comp, null, 2) }]
+        };
+      }
+
+      case 'claude_capabilities': {
+        const ver = args.versionString as string;
+        const caps = negotiateCapabilities(ver);
+        return {
+          content: [{ type: 'text', text: JSON.stringify(caps, null, 2) }]
+        };
+      }
+
+      case 'claude_session_status': {
+        const active = gcacConnector.getPid() !== undefined;
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              status: active ? 'Connected' : 'Disconnected',
+              sessionId: gcacConnector.getSessionId() || 'none',
+              metrics: gcacConnector.getMetrics()
+            }, null, 2)
+          }]
+        };
+      }
+
+      case 'claude_profile_validate': {
+        const pathFound = discoverClaudeCodePath();
+        const valid = pathFound.length > 0;
+        return {
+          content: [{ type: 'text', text: JSON.stringify({ valid, path: pathFound }, null, 2) }]
         };
       }
 
