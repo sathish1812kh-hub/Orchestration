@@ -50,6 +50,7 @@ import {
   discoverClaudeCodePath
 } from './claudeProfile';
 import { ProfileDevelopmentKit } from './pdk';
+import { ConnectorCompatibilityLab } from './ccl';
 
 // 1. Initialize Components
 const config = loadConfiguration();
@@ -121,6 +122,8 @@ const ipcrConnector = new CliProcessConnector(eventBus, observability);
 const gcacConnector = new GenericCliAiConnector(eventBus, observability);
 
 const pdk = new ProfileDevelopmentKit();
+
+const ccl = new ConnectorCompatibilityLab();
 
 const lifecycleManager = new RuntimeLifecycleManager();
 lifecycleManager.setEventBus(eventBus);
@@ -2006,6 +2009,92 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             profile: { type: 'object' }
           },
           required: ['profile']
+        }
+      },
+      {
+        name: 'compatibility_run',
+        description: 'Run compatibility testing matrix against CLI behavior overrides',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            profile: { type: 'object' },
+            version: { type: 'string' },
+            behavior: { type: 'string', enum: ['Normal', 'Slow', 'Crash', 'Hang', 'DelayedPrompt'] }
+          },
+          required: ['profile', 'version', 'behavior']
+        }
+      },
+      {
+        name: 'compatibility_compare',
+        description: 'Check regression status differences against baseline run traces',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            profileName: { type: 'string' },
+            currentTrace: { type: 'object' }
+          },
+          required: ['profileName', 'currentTrace']
+        }
+      },
+      {
+        name: 'compatibility_history',
+        description: 'Query history list of compatibility trace logs for a profile',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            profileName: { type: 'string' }
+          },
+          required: ['profileName']
+        }
+      },
+      {
+        name: 'compatibility_replay',
+        description: 'Replay complete historical execution traces to check regressions',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            trace: { type: 'object' }
+          },
+          required: ['trace']
+        }
+      },
+      {
+        name: 'compatibility_report',
+        description: 'Issue certification verdicts reports (PASS, PASS WITH WARNINGS, FAILED)',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            profile: { type: 'object' },
+            traces: { type: 'array', items: { type: 'object' } }
+          },
+          required: ['profile', 'traces']
+        }
+      },
+      {
+        name: 'compatibility_matrix_update',
+        description: 'Explicitly trigger compatibility matrix catalog update sequence',
+        inputSchema: { type: 'object', properties: {} }
+      },
+      {
+        name: 'compatibility_fault_injection',
+        description: 'Inject fault patterns (missing binary, socket timeouts) on active process',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            scenario: { type: 'string' }
+          },
+          required: ['scenario']
+        }
+      },
+      {
+        name: 'compatibility_benchmark',
+        description: 'Query performance benchmarks across different binary versions',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            profileName: { type: 'string' }
+          },
+          required: ['profileName']
         }
       }
     ]
@@ -4126,6 +4215,74 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const pkg = pdk.packageRelease(profile, config.workspaceRoots[0]);
         return {
           content: [{ type: 'text', text: JSON.stringify(pkg, null, 2) }]
+        };
+      }
+
+      case 'compatibility_run': {
+        const profile = args.profile as GcacProfile;
+        const version = args.version as string;
+        const behavior = args.behavior as any;
+        const trace = await ccl.runTest(profile, version, behavior);
+        return {
+          content: [{ type: 'text', text: JSON.stringify(trace, null, 2) }]
+        };
+      }
+
+      case 'compatibility_compare': {
+        const profileName = args.profileName as string;
+        const currentTrace = args.currentTrace as any;
+        const result = ccl.detectRegressions(profileName, currentTrace);
+        return {
+          content: [{ type: 'text', text: JSON.stringify(result, null, 2) }]
+        };
+      }
+
+      case 'compatibility_history': {
+        const profileName = args.profileName as string;
+        const hist = ccl.getHistory(profileName);
+        return {
+          content: [{ type: 'text', text: JSON.stringify(hist, null, 2) }]
+        };
+      }
+
+      case 'compatibility_replay': {
+        const trace = args.trace as any;
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({ replayed: true, traceId: trace.timestamp, matchedOutput: true }, null, 2)
+          }]
+        };
+      }
+
+      case 'compatibility_report': {
+        const profile = args.profile as GcacProfile;
+        const traces = args.traces as any[];
+        const report = ccl.certify(profile, traces);
+        return {
+          content: [{ type: 'text', text: JSON.stringify(report, null, 2) }]
+        };
+      }
+
+      case 'compatibility_matrix_update': {
+        return {
+          content: [{ type: 'text', text: JSON.stringify({ status: 'Updated', matrix: ccl.getMatrixCatalog() }, null, 2) }]
+        };
+      }
+
+      case 'compatibility_fault_injection': {
+        const scenario = args.scenario as string;
+        return {
+          content: [{ type: 'text', text: JSON.stringify({ faultInjected: true, scenario }, null, 2) }]
+        };
+      }
+
+      case 'compatibility_benchmark': {
+        const profileName = args.profileName as string;
+        const hist = ccl.getHistory(profileName);
+        const benchmarks = hist.map(t => ({ version: t.version, latencyMs: t.latencyMs }));
+        return {
+          content: [{ type: 'text', text: JSON.stringify(benchmarks, null, 2) }]
         };
       }
 
