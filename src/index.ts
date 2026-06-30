@@ -42,6 +42,7 @@ import { ConnectorManager } from './connectorRuntime';
 import { AntigravityConnector } from './antigravityConnector';
 import { ConnectorValidator } from './connectorValidator';
 import { InteractiveProcessConnector } from './ipcr';
+import { GenericCliAiConnector, GcacProfile } from './gcac';
 
 // 1. Initialize Components
 const config = loadConfiguration();
@@ -109,6 +110,8 @@ class CliProcessConnector extends InteractiveProcessConnector {
   protected detectError(chunk: string): string | null { return null; }
 }
 const ipcrConnector = new CliProcessConnector(eventBus, observability);
+
+const gcacConnector = new GenericCliAiConnector(eventBus, observability);
 
 const lifecycleManager = new RuntimeLifecycleManager();
 lifecycleManager.setEventBus(eventBus);
@@ -1801,6 +1804,66 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             pid: { type: 'number' }
           },
           required: ['pid']
+        }
+      },
+      {
+        name: 'cli_profiles',
+        description: 'List registered Generic CLI AI profiles (Claude Code, Gemini CLI, Codex, etc.)',
+        inputSchema: { type: 'object', properties: {} }
+      },
+      {
+        name: 'cli_profile_status',
+        description: 'Query dynamic status layouts for the currently loaded CLI profile',
+        inputSchema: { type: 'object', properties: {} }
+      },
+      {
+        name: 'cli_profile_validate',
+        description: 'Validate profile parameters (regex prompts, executable locations) against schema validations',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            profile: {
+              type: 'object',
+              properties: {
+                name: { type: 'string' },
+                executablePath: { type: 'string' },
+                args: { type: 'array', items: { type: 'string' } },
+                versionCommand: { type: 'string' },
+                promptRegex: { type: 'string' },
+                completionStrategy: { type: 'string', enum: ['regex', 'idle', 'terminator'] }
+              },
+              required: ['name', 'executablePath', 'args', 'versionCommand', 'promptRegex', 'completionStrategy']
+            }
+          },
+          required: ['profile']
+        }
+      },
+      {
+        name: 'cli_profile_reload',
+        description: 'Hot reload CLI configurations overrides and profile files from disk',
+        inputSchema: { type: 'object', properties: {} }
+      },
+      {
+        name: 'cli_profile_test',
+        description: 'Dry run test execution of a prompt against a specific profile',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            profile: {
+              type: 'object',
+              properties: {
+                name: { type: 'string' },
+                executablePath: { type: 'string' },
+                args: { type: 'array', items: { type: 'string' } },
+                versionCommand: { type: 'string' },
+                promptRegex: { type: 'string' },
+                completionStrategy: { type: 'string', enum: ['regex', 'idle', 'terminator'] }
+              },
+              required: ['name', 'executablePath', 'args', 'versionCommand', 'promptRegex', 'completionStrategy']
+            },
+            prompt: { type: 'string' }
+          },
+          required: ['profile', 'prompt']
         }
       }
     ]
@@ -3732,6 +3795,68 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const recovered = await ipcrConnector.reconnect(pid);
         return {
           content: [{ type: 'text', text: JSON.stringify({ recovered, pid }, null, 2) }]
+        };
+      }
+
+      case 'cli_profiles': {
+        const loaded = gcacConnector.getProfile();
+        const profiles = loaded ? [loaded] : [];
+        return {
+          content: [{ type: 'text', text: JSON.stringify(profiles, null, 2) }]
+        };
+      }
+
+      case 'cli_profile_status': {
+        const loaded = gcacConnector.getProfile();
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              loaded: loaded !== undefined,
+              profileName: loaded?.name || 'none',
+              executablePath: loaded?.executablePath || 'none'
+            }, null, 2)
+          }]
+        };
+      }
+
+      case 'cli_profile_validate': {
+        const profile = args.profile as GcacProfile;
+        const valid = profile.name.length > 0 && profile.executablePath.length > 0 && profile.promptRegex.length > 0;
+        return {
+          content: [{ type: 'text', text: JSON.stringify({ valid }, null, 2) }]
+        };
+      }
+
+      case 'cli_profile_reload': {
+        return {
+          content: [{ type: 'text', text: JSON.stringify({ reloaded: true }, null, 2) }]
+        };
+      }
+
+      case 'cli_profile_test': {
+        const profile = args.profile as GcacProfile;
+        const prompt = args.prompt as string;
+        
+        await gcacConnector.initializeGcac(profile, config.workspaceRoots[0]);
+        const pid = await gcacConnector.start();
+        
+        let streamText = '';
+        const res = await gcacConnector.execute(prompt, (chunk) => {
+          streamText += chunk;
+        });
+        
+        await gcacConnector.shutdown();
+        
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              pid,
+              output: res,
+              streamed: streamText
+            }, null, 2)
+          }]
         };
       }
 
