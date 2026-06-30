@@ -49,6 +49,7 @@ import {
   validateVersionCompatibility,
   discoverClaudeCodePath
 } from './claudeProfile';
+import { ProfileDevelopmentKit } from './pdk';
 
 // 1. Initialize Components
 const config = loadConfiguration();
@@ -118,6 +119,8 @@ class CliProcessConnector extends InteractiveProcessConnector {
 const ipcrConnector = new CliProcessConnector(eventBus, observability);
 
 const gcacConnector = new GenericCliAiConnector(eventBus, observability);
+
+const pdk = new ProfileDevelopmentKit();
 
 const lifecycleManager = new RuntimeLifecycleManager();
 lifecycleManager.setEventBus(eventBus);
@@ -1913,6 +1916,96 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             profilePath: { type: 'string' }
           },
           required: ['profilePath']
+        }
+      },
+      {
+        name: 'profile_generate',
+        description: 'Generate template profiles scaffold including config templates',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            name: { type: 'string' },
+            executablePath: { type: 'string' },
+            args: { type: 'array', items: { type: 'string' } },
+            versionCommand: { type: 'string' },
+            promptRegex: { type: 'string' },
+            completionStrategy: { type: 'string', enum: ['regex', 'idle', 'terminator'] }
+          },
+          required: ['name', 'executablePath', 'args', 'versionCommand', 'promptRegex', 'completionStrategy']
+        }
+      },
+      {
+        name: 'profile_validate',
+        description: 'Execute deep schema validations on a candidate profile layout',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            profile: { type: 'object' }
+          },
+          required: ['profile']
+        }
+      },
+      {
+        name: 'profile_mock',
+        description: 'Compile deterministic mock CLI processes to test prompt flows',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            banner: { type: 'string' },
+            prompt: { type: 'string' },
+            successOutput: { type: 'string' }
+          },
+          required: ['banner', 'prompt', 'successOutput']
+        }
+      },
+      {
+        name: 'profile_parser_test',
+        description: 'Validate regex and thinking markers against test response streams',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            profile: { type: 'object' },
+            text: { type: 'string' }
+          },
+          required: ['profile', 'text']
+        }
+      },
+      {
+        name: 'profile_certify',
+        description: 'Execute PDK certification validating schema, capabilities, and parsers compatibility',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            profile: { type: 'object' }
+          },
+          required: ['profile']
+        }
+      },
+      {
+        name: 'profile_documentation',
+        description: 'Automatically generate formatted markdown overview documentation for a profile',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            profile: { type: 'object' }
+          },
+          required: ['profile']
+        }
+      },
+      {
+        name: 'compatibility_matrix',
+        description: 'Retrieve catalog matrices listing validated connector versions',
+        inputSchema: { type: 'object', properties: {} }
+      },
+      {
+        name: 'profile_release_package',
+        description: 'Generate release packages bundles and sha256 checksum tags',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            profile: { type: 'object' }
+          },
+          required: ['profile']
         }
       }
     ]
@@ -3958,6 +4051,81 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const valid = pathFound.length > 0;
         return {
           content: [{ type: 'text', text: JSON.stringify({ valid, path: pathFound }, null, 2) }]
+        };
+      }
+
+      case 'profile_generate': {
+        const opts = {
+          name: args.name as string,
+          executablePath: args.executablePath as string,
+          args: args.args as string[],
+          versionCommand: args.versionCommand as string,
+          promptRegex: args.promptRegex as string,
+          completionStrategy: args.completionStrategy as any
+        };
+        const scaffold = pdk.generateScaffold(opts);
+        return {
+          content: [{ type: 'text', text: JSON.stringify(scaffold, null, 2) }]
+        };
+      }
+
+      case 'profile_validate': {
+        const profile = args.profile as GcacProfile;
+        const res = pdk.validateProfileSchema(profile);
+        return {
+          content: [{ type: 'text', text: JSON.stringify(res, null, 2) }]
+        };
+      }
+
+      case 'profile_mock': {
+        const opts = {
+          banner: args.banner as string,
+          prompt: args.prompt as string,
+          successOutput: args.successOutput as string
+        };
+        const code = pdk.generateMockCliCode(opts);
+        return {
+          content: [{ type: 'text', text: code }]
+        };
+      }
+
+      case 'profile_parser_test': {
+        const profile = args.profile as GcacProfile;
+        const text = args.text as string;
+        const result = pdk.testParser(profile, text);
+        return {
+          content: [{ type: 'text', text: JSON.stringify(result, null, 2) }]
+        };
+      }
+
+      case 'profile_certify': {
+        const profile = args.profile as GcacProfile;
+        const cert = pdk.certifyProfile(profile);
+        return {
+          content: [{ type: 'text', text: JSON.stringify(cert, null, 2) }]
+        };
+      }
+
+      case 'profile_documentation': {
+        const profile = args.profile as GcacProfile;
+        const doc = `# Profile documentation for ${profile.name}\n\nThis profile uses binary ${profile.executablePath} to advertise dynamic capabilities.`;
+        return {
+          content: [{ type: 'text', text: doc }]
+        };
+      }
+
+      case 'compatibility_matrix': {
+        const matrix = pdk.getCompatibilityMatrix();
+        return {
+          content: [{ type: 'text', text: JSON.stringify(matrix, null, 2) }]
+        };
+      }
+
+      case 'profile_release_package': {
+        const profile = args.profile as GcacProfile;
+        const pkg = pdk.packageRelease(profile, config.workspaceRoots[0]);
+        return {
+          content: [{ type: 'text', text: JSON.stringify(pkg, null, 2) }]
         };
       }
 
