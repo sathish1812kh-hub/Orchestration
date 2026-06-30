@@ -1,0 +1,5 @@
+node_modules/
+dist/
+config.json
+audit_log.jsonl
+.git/

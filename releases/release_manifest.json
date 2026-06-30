@@ -1,0 +1,26 @@
+{
+  "version": "1.0.0",
+  "buildNumber": "10042",
+  "commitHash": "f3b2a59a721cde882b49e29a8f4c029a1b1b11b1",
+  "timestamp": 1782848286168,
+  "artifacts": [
+    {
+      "name": "mcp-platform-examples-v1.0.0.zip",
+      "path": "./releases/mcp-platform-examples-v1.0.0.zip",
+      "sha256": "c3d3e4943491332329c1eb77fd193a3cd46e4332f7bac62ab8fe03278688689d",
+      "sha512": "48bf29fdac52c94f86c2a43c2d0fc2fa042cd64640a99d38e7c09c1f0ff3b99a70cd3d31abf6447667fd7e227fbb818fbc35b8834739146148e66dfcf74a36cf"
+    },
+    {
+      "name": "mcp-platform-sdk-v1.0.0.tgz",
+      "path": "./releases/mcp-platform-sdk-v1.0.0.tgz",
+      "sha256": "752144b0ffaa5a627c7f0fed001e48d01014c488e90b0ff65da0a107354bfdfc",
+      "sha512": "cd1c6489885c047f4b6520ef255781a47886a0ec8d94e7e38905f405ae350cfd5e6cdf9ab0455554d003bf9b7772104b48ec7264e33ccafc2839ddcf1a33c801"
+    },
+    {
+      "name": "mcp-platform-v1.0.0-portable.zip",
+      "path": "./releases/mcp-platform-v1.0.0-portable.zip",
+      "sha256": "dd3b2424ab82be2cbed9e7202044eb4600f333806eae0c482661c7471b87cd89",
+      "sha512": "f8944349ae4ecd419cbb7cb16038cb8ffc07472bc5e1ac4749dec1f4b985926b16df84e451520a6a0fe9f82587a91cac224b7530bf9c1faa4deacfb6ac142314"
+    }
+  ]
+}
