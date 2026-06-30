@@ -39,6 +39,7 @@ import { ObservabilityPlatform } from './observability';
 import { ControlPlaneServer } from './controlPlane';
 import { ReleaseManager } from './release';
 import { ConnectorManager } from './connectorRuntime';
+import { AntigravityConnector } from './antigravityConnector';
 
 // 1. Initialize Components
 const config = loadConfiguration();
@@ -88,6 +89,15 @@ configManager.setEventBus(eventBus);
 const observability = new ObservabilityPlatform();
 
 const connectorManager = new ConnectorManager(eventBus, observability);
+
+const antigravityConnector = new AntigravityConnector(
+  connectorManager,
+  terminalManager,
+  promptDetectionEngine,
+  streamingEngine,
+  eventBus,
+  observability
+);
 
 const lifecycleManager = new RuntimeLifecycleManager();
 lifecycleManager.setEventBus(eventBus);
@@ -1647,6 +1657,59 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             sessionId: { type: 'string' }
           },
           required: ['connectorId', 'sessionId']
+        }
+      },
+      {
+        name: 'antigravity_connect',
+        description: 'Start and attach to PowerShell CLI session for Antigravity agent integration',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            workspaceRoot: { type: 'string' }
+          },
+          required: ['workspaceRoot']
+        }
+      },
+      {
+        name: 'antigravity_disconnect',
+        description: 'Gracefully close current Antigravity terminal session',
+        inputSchema: { type: 'object', properties: {} }
+      },
+      {
+        name: 'antigravity_sessions',
+        description: 'List current active or surviving Antigravity connector sessions',
+        inputSchema: { type: 'object', properties: {} }
+      },
+      {
+        name: 'antigravity_execute',
+        description: 'Execute an AI task prompt using the Antigravity agent connector',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            prompt: { type: 'string' }
+          },
+          required: ['prompt']
+        }
+      },
+      {
+        name: 'antigravity_status',
+        description: 'Query status lifecycle metrics and latency indicators for the Antigravity connector',
+        inputSchema: { type: 'object', properties: {} }
+      },
+      {
+        name: 'antigravity_capabilities',
+        description: 'Query the dynamic capabilities advertised by the Antigravity connector',
+        inputSchema: { type: 'object', properties: {} }
+      },
+      {
+        name: 'antigravity_recover',
+        description: 'Perform recovery restore cycle on surviving Antigravity terminal sessions',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            workspaceRoot: { type: 'string' }
+          },
+          required: ['workspaceRoot']
         }
       }
     ]
@@ -3403,6 +3466,69 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const triggered = connectorManager.triggerRecovery(connId, sessId);
         return {
           content: [{ type: 'text', text: JSON.stringify({ triggered }, null, 2) }]
+        };
+      }
+
+      case 'antigravity_connect': {
+        const root = args.workspaceRoot as string;
+        // Mock path check or launch using ConsoleBridge binary to simulate stable runtimes
+        const agyPath = path.join(process.cwd(), 'dist', 'ConsoleBridge.exe');
+        const uuid = await antigravityConnector.connect(root, { agyPath });
+        return {
+          content: [{ type: 'text', text: JSON.stringify({ status: 'Connected', terminalUuid: uuid }, null, 2) }]
+        };
+      }
+
+      case 'antigravity_disconnect': {
+        await antigravityConnector.disconnect();
+        return {
+          content: [{ type: 'text', text: JSON.stringify({ status: 'Disconnected' }, null, 2) }]
+        };
+      }
+
+      case 'antigravity_sessions': {
+        const uuid = antigravityConnector.getActiveTerminalUuid();
+        return {
+          content: [{ type: 'text', text: JSON.stringify(uuid ? [uuid] : [], null, 2) }]
+        };
+      }
+
+      case 'antigravity_execute': {
+        const prompt = args.prompt as string;
+        let chunks = '';
+        const res = await antigravityConnector.execute(prompt, (chunk) => {
+          chunks += chunk;
+        });
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              result: res.output,
+              streamedChunks: chunks
+            }, null, 2)
+          }]
+        };
+      }
+
+      case 'antigravity_status': {
+        const metrics = antigravityConnector.getMetrics();
+        return {
+          content: [{ type: 'text', text: JSON.stringify(metrics, null, 2) }]
+        };
+      }
+
+      case 'antigravity_capabilities': {
+        const conn = connectorManager.getConnector(antigravityConnector.getConnectorId());
+        return {
+          content: [{ type: 'text', text: JSON.stringify(conn?.capabilities || [], null, 2) }]
+        };
+      }
+
+      case 'antigravity_recover': {
+        const root = args.workspaceRoot as string;
+        const recovered = await antigravityConnector.recover(root);
+        return {
+          content: [{ type: 'text', text: JSON.stringify({ recovered }, null, 2) }]
         };
       }
 
