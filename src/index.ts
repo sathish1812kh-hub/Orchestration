@@ -38,6 +38,7 @@ import { ConfigurationSecretsManager } from './configManager';
 import { ObservabilityPlatform } from './observability';
 import { ControlPlaneServer } from './controlPlane';
 import { ReleaseManager } from './release';
+import { ConnectorManager } from './connectorRuntime';
 
 // 1. Initialize Components
 const config = loadConfiguration();
@@ -85,6 +86,8 @@ const configManager = new ConfigurationSecretsManager();
 configManager.setEventBus(eventBus);
 
 const observability = new ObservabilityPlatform();
+
+const connectorManager = new ConnectorManager(eventBus, observability);
 
 const lifecycleManager = new RuntimeLifecycleManager();
 lifecycleManager.setEventBus(eventBus);
@@ -1612,6 +1615,38 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             }
           },
           required: ['manifest']
+        }
+      },
+      {
+        name: 'connector_runtime_status',
+        description: 'Get operational readiness and status profiles for the Universal Connector Runtime',
+        inputSchema: { type: 'object', properties: {} }
+      },
+      {
+        name: 'connector_sessions',
+        description: 'List active execution sessions running over AI connectors',
+        inputSchema: { type: 'object', properties: {} }
+      },
+      {
+        name: 'connector_registry',
+        description: 'List registered AI agent connectors (Claude, Gemini, etc.) and capabilities',
+        inputSchema: { type: 'object', properties: {} }
+      },
+      {
+        name: 'connector_metrics',
+        description: 'Retrieve real-time connector metrics, success rates, and streamed messages counts',
+        inputSchema: { type: 'object', properties: {} }
+      },
+      {
+        name: 'connector_recovery',
+        description: 'Manually trigger session recovery procedures for a suspended connector session',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            connectorId: { type: 'string' },
+            sessionId: { type: 'string' }
+          },
+          required: ['connectorId', 'sessionId']
         }
       }
     ]
@@ -3324,6 +3359,50 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const result = releaseManager.verifyRelease(manifest);
         return {
           content: [{ type: 'text', text: JSON.stringify(result, null, 2) }]
+        };
+      }
+
+      case 'connector_runtime_status': {
+        const metrics = connectorManager.getRuntimeMetrics();
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              status: 'Ready',
+              activeConnectors: metrics.activeConnectorsCount,
+              activeSessions: metrics.activeSessionsCount
+            }, null, 2)
+          }]
+        };
+      }
+
+      case 'connector_sessions': {
+        const sessions = connectorManager.listSessions();
+        return {
+          content: [{ type: 'text', text: JSON.stringify(sessions, null, 2) }]
+        };
+      }
+
+      case 'connector_registry': {
+        const connectors = connectorManager.listConnectors();
+        return {
+          content: [{ type: 'text', text: JSON.stringify(connectors, null, 2) }]
+        };
+      }
+
+      case 'connector_metrics': {
+        const metrics = connectorManager.getRuntimeMetrics();
+        return {
+          content: [{ type: 'text', text: JSON.stringify(metrics, null, 2) }]
+        };
+      }
+
+      case 'connector_recovery': {
+        const connId = args.connectorId as string;
+        const sessId = args.sessionId as string;
+        const triggered = connectorManager.triggerRecovery(connId, sessId);
+        return {
+          content: [{ type: 'text', text: JSON.stringify({ triggered }, null, 2) }]
         };
       }
 
