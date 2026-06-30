@@ -41,6 +41,7 @@ import { ReleaseManager } from './release';
 import { ConnectorManager } from './connectorRuntime';
 import { AntigravityConnector } from './antigravityConnector';
 import { ConnectorValidator } from './connectorValidator';
+import { InteractiveProcessConnector } from './ipcr';
 
 // 1. Initialize Components
 const config = loadConfiguration();
@@ -101,6 +102,13 @@ const antigravityConnector = new AntigravityConnector(
 );
 
 const connectorValidator = new ConnectorValidator(connectorManager);
+
+class CliProcessConnector extends InteractiveProcessConnector {
+  protected parseBanner(banner: string): void {}
+  protected filterOutput(chunk: string): string { return chunk; }
+  protected detectError(chunk: string): string | null { return null; }
+}
+const ipcrConnector = new CliProcessConnector(eventBus, observability);
 
 const lifecycleManager = new RuntimeLifecycleManager();
 lifecycleManager.setEventBus(eventBus);
@@ -1757,6 +1765,43 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         name: 'connector_certification_history',
         description: 'Retrieve history list of executed certification runs and PASS/FAIL outcomes',
         inputSchema: { type: 'object', properties: {} }
+      },
+      {
+        name: 'process_connector_status',
+        description: 'Query operational status parameters of the Interactive Process Connector Runtime',
+        inputSchema: { type: 'object', properties: {} }
+      },
+      {
+        name: 'process_connector_sessions',
+        description: 'List active execution sessions running over process-based connectors',
+        inputSchema: { type: 'object', properties: {} }
+      },
+      {
+        name: 'process_connector_metrics',
+        description: 'Retrieve performance and throughput latency metrics for interactive process processes',
+        inputSchema: { type: 'object', properties: {} }
+      },
+      {
+        name: 'process_connector_attach',
+        description: 'Attach the IPCR context wrapper to an existing OS process identifier PID',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            pid: { type: 'number' }
+          },
+          required: ['pid']
+        }
+      },
+      {
+        name: 'process_connector_recover',
+        description: 'Trigger reconnect checks or crash recovery restarts for a process session',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            pid: { type: 'number' }
+          },
+          required: ['pid']
+        }
       }
     ]
   };
@@ -3635,6 +3680,58 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const history = connectorValidator.getHistory();
         return {
           content: [{ type: 'text', text: JSON.stringify(history, null, 2) }]
+        };
+      }
+
+      case 'process_connector_status': {
+        const active = ipcrConnector.getPid() !== undefined;
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              status: active ? 'Active' : 'Idle',
+              activePid: ipcrConnector.getPid()
+            }, null, 2)
+          }]
+        };
+      }
+
+      case 'process_connector_sessions': {
+        const sess = ipcrConnector.getSessionId();
+        const pid = ipcrConnector.getPid();
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify(sess && pid ? [{
+              sessionId: sess,
+              pid,
+              status: 'Active',
+              createdAt: Date.now()
+            }] : [], null, 2)
+          }]
+        };
+      }
+
+      case 'process_connector_metrics': {
+        const metrics = ipcrConnector.getMetrics();
+        return {
+          content: [{ type: 'text', text: JSON.stringify(metrics, null, 2) }]
+        };
+      }
+
+      case 'process_connector_attach': {
+        const pid = args.pid as number;
+        const attached = await ipcrConnector.reconnect(pid);
+        return {
+          content: [{ type: 'text', text: JSON.stringify({ attached, pid }, null, 2) }]
+        };
+      }
+
+      case 'process_connector_recover': {
+        const pid = args.pid as number;
+        const recovered = await ipcrConnector.reconnect(pid);
+        return {
+          content: [{ type: 'text', text: JSON.stringify({ recovered, pid }, null, 2) }]
         };
       }
 
