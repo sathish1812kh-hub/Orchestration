@@ -6597,7 +6597,7 @@ async function run() {
     }
   } else {
     // Start standard local stdin/stdout Stdio transport
-    console.error('No NGROK_AUTHTOKEN provided. Starting in Local Stdio mode...');
+    console.error('Starting in Local Stdio mode...');
     const transport = new StdioServerTransport();
     await server.connect(transport);
 
