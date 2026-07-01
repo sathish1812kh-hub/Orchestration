@@ -1,0 +1,28 @@
+version: '3.8'
+
+services:
+  mcp-gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: mcp-orchestration-gateway
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    env_file:
+      - .env
+    environment:
+      - PORT=5000
+      - HOST=0.0.0.0
+      - NODE_ENV=production
+      - PLUGIN_DIRECTORY=/app/plugins
+    volumes:
+      # Mount configuration file for dynamic policy updates
+      - ./config.json:/app/config.json
+      # Mount persistent plugins directory
+      - ./plugins:/app/plugins
+      # Mount event store database log
+      - ./event_store.jsonl:/app/event_store.jsonl
+      # Mount local source workspace so containerized tools can run inside it
+      - .:/app/workspace
+    working_dir: /app

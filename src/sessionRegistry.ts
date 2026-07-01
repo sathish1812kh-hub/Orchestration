@@ -49,28 +49,28 @@ export class PersistentShell {
 
     this.startProcess();
   }
-
   private startProcess() {
-    let executable = 'powershell.exe';
+    const isWindows = process.platform === 'win32';
+    let executable = isWindows ? 'powershell.exe' : 'bash';
     let args: string[] = [];
 
     switch (this.shellType) {
       case 'pwsh':
-        executable = 'pwsh.exe';
-        args = ['-NoLogo', '-NoExit', '-Command', '-'];
+        executable = isWindows ? 'pwsh.exe' : 'pwsh';
+        args = isWindows ? ['-NoLogo', '-NoExit', '-Command', '-'] : ['-nologo'];
         break;
       case 'cmd':
-        executable = 'cmd.exe';
-        args = ['/k'];
+        executable = isWindows ? 'cmd.exe' : '/bin/sh';
+        args = isWindows ? ['/k'] : [];
         break;
       case 'wsl':
-        executable = 'wsl.exe';
+        executable = isWindows ? 'wsl.exe' : '/bin/bash';
         args = [];
         break;
       case 'powershell':
       default:
-        executable = 'powershell.exe';
-        args = ['-NoLogo', '-NoExit', '-Command', '-'];
+        executable = isWindows ? 'powershell.exe' : 'bash';
+        args = isWindows ? ['-NoLogo', '-NoExit', '-Command', '-'] : [];
         break;
     }
 
@@ -79,7 +79,6 @@ export class PersistentShell {
       env: { ...process.env },
       shell: false
     });
-
     this.process.stdout.on('data', (data) => {
       this.stdoutBuffer += data.toString();
       this.checkCommandCompletion();

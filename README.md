@@ -226,6 +226,29 @@ The test suite validates:
 
 ---
 
+## 🐳 Docker Deployment
+
+The gateway can be deployed in a lightweight, containerized environment using Docker.
+
+### 1. Build the Docker Image
+```bash
+docker build -t mcp-orchestration-gateway .
+```
+
+### 2. Run with Docker Compose
+Ensure you have configured your environment variables in `.env` (like `PORT`, `NGROK_AUTHTOKEN`), then start the gateway:
+```bash
+docker-compose up -d
+```
+
+### 3. Stdio Mode inside Docker (Claude Desktop)
+For local stdio-based clients, you can spawn the container running stdio:
+```bash
+docker run -i --rm -v ${PWD}/config.json:/app/config.json mcp-orchestration-gateway node dist/index.js --stdio
+```
+
+---
+
 ## 📈 Performance Characteristics
 * **Command Latency:** Standard local terminal execution overhead ranges from 15ms to 50ms.
 * **ngrok Routing Latency:** Adds 40ms to 120ms network overhead.
