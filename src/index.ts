@@ -65,6 +65,12 @@ import {
   validateGeminiVersion,
   discoverGeminiCliPath
 } from './geminiProfile';
+import {
+  OPENAI_CLI_PROFILE,
+  negotiateOpenaiCapabilities,
+  validateOpenaiVersion,
+  discoverOpenaiCliPath
+} from './openaiProfile';
 
 // 1. Initialize Components
 const config = loadConfiguration();
@@ -138,6 +144,8 @@ const gcacConnector = new GenericCliAiConnector(eventBus, observability);
 const codexConnector = new GenericCliAiConnector(eventBus, observability);
 
 const geminiConnector = new GenericCliAiConnector(eventBus, observability);
+
+const openaiConnector = new GenericCliAiConnector(eventBus, observability);
 
 const pdk = new ProfileDevelopmentKit();
 
@@ -2431,6 +2439,69 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       {
         name: 'gemini_recover',
         description: 'Trigger failover recovery procedures on disconnected Gemini sessions',
+        inputSchema: { type: 'object', properties: {} }
+      },
+      {
+        name: 'openai_connect',
+        description: 'Initialize and start OpenAI-Compatible CLI connection session',
+        inputSchema: { type: 'object', properties: {} }
+      },
+      {
+        name: 'openai_disconnect',
+        description: 'Shutdown active OpenAI-Compatible CLI connection session',
+        inputSchema: { type: 'object', properties: {} }
+      },
+      {
+        name: 'openai_execute',
+        description: 'Execute prompt request against OpenAI-Compatible CLI session',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            prompt: { type: 'string' }
+          },
+          required: ['prompt']
+        }
+      },
+      {
+        name: 'openai_status',
+        description: 'Query connection logs and active state metrics of OpenAI session',
+        inputSchema: { type: 'object', properties: {} }
+      },
+      {
+        name: 'openai_sessions',
+        description: 'List active PIDs and tracking metrics of all OpenAI sessions',
+        inputSchema: { type: 'object', properties: {} }
+      },
+      {
+        name: 'openai_capabilities',
+        description: 'Dynamically negotiate OpenAI capability lists based on version number limits',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            versionString: { type: 'string' }
+          },
+          required: ['versionString']
+        }
+      },
+      {
+        name: 'openai_profile_status',
+        description: 'Query discovery paths and loaded statuses for the OpenAI Profile',
+        inputSchema: { type: 'object', properties: {} }
+      },
+      {
+        name: 'openai_validate',
+        description: 'Run compatibility checks and version validations on OpenAI-Compatible configuration',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            profilePath: { type: 'string' }
+          },
+          required: ['profilePath']
+        }
+      },
+      {
+        name: 'openai_recover',
+        description: 'Trigger failover recovery procedures on disconnected OpenAI sessions',
         inputSchema: { type: 'object', properties: {} }
       }
     ]
@@ -4970,6 +5041,92 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case 'gemini_recover': {
         const recovered = geminiConnector.getPid() !== undefined;
+        return {
+          content: [{ type: 'text', text: JSON.stringify({ status: 'Recovered', active: recovered }, null, 2) }]
+        };
+      }
+
+      case 'openai_connect': {
+        await openaiConnector.initializeGcac(OPENAI_CLI_PROFILE, config.workspaceRoots[0] || process.cwd());
+        const pid = await openaiConnector.start();
+        return {
+          content: [{ type: 'text', text: JSON.stringify({ pid, status: 'Connected' }, null, 2) }]
+        };
+      }
+
+      case 'openai_disconnect': {
+        await openaiConnector.shutdown();
+        return {
+          content: [{ type: 'text', text: JSON.stringify({ status: 'Disconnected' }, null, 2) }]
+        };
+      }
+
+      case 'openai_execute': {
+        const prompt = args.prompt as string;
+        const out = await openaiConnector.execute(prompt, () => {});
+        return {
+          content: [{ type: 'text', text: out }]
+        };
+      }
+
+      case 'openai_status': {
+        const active = openaiConnector.getPid() !== undefined;
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              status: active ? 'Connected' : 'Disconnected',
+              sessionId: openaiConnector.getSessionId() || 'none',
+              metrics: openaiConnector.getMetrics()
+            }, null, 2)
+          }]
+        };
+      }
+
+      case 'openai_sessions': {
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify([{
+              name: 'openai-cli',
+              pid: openaiConnector.getPid() || null,
+              sessionId: openaiConnector.getSessionId() || 'none'
+            }], null, 2)
+          }]
+        };
+      }
+
+      case 'openai_capabilities': {
+        const ver = args.versionString as string;
+        const caps = negotiateOpenaiCapabilities(ver);
+        return {
+          content: [{ type: 'text', text: JSON.stringify(caps, null, 2) }]
+        };
+      }
+
+      case 'openai_profile_status': {
+        const pathFound = discoverOpenaiCliPath();
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              loaded: openaiConnector.getProfile()?.name === 'openai-cli',
+              discoveredPath: pathFound,
+              isCompatible: true
+            }, null, 2)
+          }]
+        };
+      }
+
+      case 'openai_validate': {
+        const valid = discoverOpenaiCliPath().length > 0;
+        return {
+          content: [{ type: 'text', text: JSON.stringify({ valid }, null, 2) }]
+        };
+      }
+
+      case 'openai_recover': {
+        const recovered = openaiConnector.getPid() !== undefined;
         return {
           content: [{ type: 'text', text: JSON.stringify({ status: 'Recovered', active: recovered }, null, 2) }]
         };
