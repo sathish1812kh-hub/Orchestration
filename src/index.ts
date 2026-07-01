@@ -52,6 +52,7 @@ import {
 import { ProfileDevelopmentKit } from './pdk';
 import { ConnectorCompatibilityLab } from './ccl';
 import { RealConnectorAcceptanceTest } from './rcat';
+import { ArchitectureGovernance } from './governance';
 
 // 1. Initialize Components
 const config = loadConfiguration();
@@ -127,6 +128,8 @@ const pdk = new ProfileDevelopmentKit();
 const ccl = new ConnectorCompatibilityLab();
 
 const rcat = new RealConnectorAcceptanceTest();
+
+const governance = new ArchitectureGovernance();
 
 const lifecycleManager = new RuntimeLifecycleManager();
 lifecycleManager.setEventBus(eventBus);
@@ -2167,6 +2170,98 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             executablePath: { type: 'string' }
           },
           required: ['profile', 'executablePath']
+        }
+      },
+      {
+        name: 'architecture_status',
+        description: 'Query freeze classification statuses of platform components',
+        inputSchema: { type: 'object', properties: {} }
+      },
+      {
+        name: 'architecture_freeze',
+        description: 'Configure components freeze classifications (Frozen | Extensible)',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            component: { type: 'string' },
+            status: { type: 'string', enum: ['Frozen', 'Extensible'] }
+          },
+          required: ['component', 'status']
+        }
+      },
+      {
+        name: 'adr_list',
+        description: 'List registered Architecture Decision Records (ADRs)',
+        inputSchema: { type: 'object', properties: {} }
+      },
+      {
+        name: 'adr_register',
+        description: 'Register a new Architecture Decision Record (ADR) in the registry catalog',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            number: { type: 'number' },
+            title: { type: 'string' },
+            author: { type: 'string' },
+            context: { type: 'string' },
+            decision: { type: 'string' },
+            consequences: { type: 'string' }
+          },
+          required: ['number', 'title', 'author', 'context', 'decision', 'consequences']
+        }
+      },
+      {
+        name: 'adr_status',
+        description: 'Update the resolution status of a registered ADR',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            number: { type: 'number' },
+            status: { type: 'string', enum: ['Proposed', 'Accepted', 'Superseded', 'Deprecated', 'Rejected'] }
+          },
+          required: ['number', 'status']
+        }
+      },
+      {
+        name: 'api_stability',
+        description: 'Query stability classifications for platform APIs and SDKs',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            apiName: { type: 'string' },
+            stability: { type: 'string', enum: ['Experimental', 'Beta', 'Stable', 'Deprecated', 'Removed'] },
+            version: { type: 'string' }
+          }
+        }
+      },
+      {
+        name: 'governance_report',
+        description: 'Retrieve general architecture governance validation summaries',
+        inputSchema: { type: 'object', properties: {} }
+      },
+      {
+        name: 'governance_validate',
+        description: 'Evaluate extension proposals against component freeze safety gate checks',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            componentName: { type: 'string' },
+            proposedChangeType: { type: 'string', enum: ['refactor', 'bugfix', 'feature', 'breaking'] }
+          },
+          required: ['componentName', 'proposedChangeType']
+        }
+      },
+      {
+        name: 'release_readiness',
+        description: 'Perform automated quality gates release readiness evaluations',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            testsPassed: { type: 'boolean' },
+            observabilityHealthy: { type: 'boolean' },
+            documentationComplete: { type: 'boolean' }
+          },
+          required: ['testsPassed', 'observabilityHealthy', 'documentationComplete']
         }
       }
     ]
@@ -4411,6 +4506,101 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const env = rcat.getEnvironmentDetails(profile, p, '1.2.0');
         return {
           content: [{ type: 'text', text: JSON.stringify(env, null, 2) }]
+        };
+      }
+
+      case 'architecture_status': {
+        const components = ['Kernel', 'EventBus', 'WorkflowEngine', 'GCAC', 'IPCR', 'PDK', 'CCL', 'RCAT', 'ConnectorProfiles', 'Plugins'];
+        const statusMap = components.map(c => ({ component: c, status: governance.getComponentStatus(c) }));
+        return {
+          content: [{ type: 'text', text: JSON.stringify(statusMap, null, 2) }]
+        };
+      }
+
+      case 'architecture_freeze': {
+        const comp = args.component as string;
+        const status = args.status as 'Frozen' | 'Extensible';
+        governance.setComponentStatus(comp, status);
+        return {
+          content: [{ type: 'text', text: JSON.stringify({ component: comp, status }, null, 2) }]
+        };
+      }
+
+      case 'adr_list': {
+        const adrs = governance.getAdrs();
+        return {
+          content: [{ type: 'text', text: JSON.stringify(adrs, null, 2) }]
+        };
+      }
+
+      case 'adr_register': {
+        const adr = {
+          number: args.number as number,
+          title: args.title as string,
+          author: args.author as string,
+          date: new Date().toISOString().split('T')[0],
+          status: 'Proposed' as const,
+          context: args.context as string,
+          decision: args.decision as string,
+          consequences: args.consequences as string
+        };
+        governance.registerAdr(adr);
+        return {
+          content: [{ type: 'text', text: JSON.stringify(adr, null, 2) }]
+        };
+      }
+
+      case 'adr_status': {
+        const num = args.number as number;
+        const status = args.status as any;
+        governance.updateAdrStatus(num, status);
+        return {
+          content: [{ type: 'text', text: JSON.stringify({ number: num, status }, null, 2) }]
+        };
+      }
+
+      case 'api_stability': {
+        if (args.apiName && args.stability && args.version) {
+          governance.registerApi({
+            apiName: args.apiName as string,
+            stability: args.stability as any,
+            version: args.version as string
+          });
+        }
+        return {
+          content: [{ type: 'text', text: JSON.stringify(governance.getApiCatalog(), null, 2) }]
+        };
+      }
+
+      case 'governance_report': {
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              adrCount: governance.getAdrs().length,
+              componentsCount: 10,
+              releaseGated: true
+            }, null, 2)
+          }]
+        };
+      }
+
+      case 'governance_validate': {
+        const comp = args.componentName as string;
+        const change = args.proposedChangeType as any;
+        const res = governance.validateExtensionChange(comp, change);
+        return {
+          content: [{ type: 'text', text: JSON.stringify(res, null, 2) }]
+        };
+      }
+
+      case 'release_readiness': {
+        const passed = args.testsPassed as boolean;
+        const healthy = args.observabilityHealthy as boolean;
+        const complete = args.documentationComplete as boolean;
+        const res = governance.checkReleaseReadiness(passed, healthy, complete);
+        return {
+          content: [{ type: 'text', text: JSON.stringify(res, null, 2) }]
         };
       }
 
