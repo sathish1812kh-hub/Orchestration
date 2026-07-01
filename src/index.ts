@@ -78,6 +78,7 @@ import {
   discoverQwenCliPath
 } from './qwenProfile';
 import { UniversalConnectorCertification } from './uccf';
+import { MaceCollaborationEngine } from './mace';
 
 // 1. Initialize Components
 const config = loadConfiguration();
@@ -165,6 +166,8 @@ const rcat = new RealConnectorAcceptanceTest();
 const governance = new ArchitectureGovernance();
 
 const uccf = new UniversalConnectorCertification();
+
+const mace = new MaceCollaborationEngine(eventBus, observability);
 
 const lifecycleManager = new RuntimeLifecycleManager();
 lifecycleManager.setEventBus(eventBus);
@@ -2631,6 +2634,129 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         name: 'connector_report',
         description: 'Generate formatted certification summary reports for administrative releases',
         inputSchema: { type: 'object', properties: {} }
+      },
+      {
+        name: 'create_collaboration',
+        description: 'Create and initialize a new MACE collaboration session with participants allocation',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            sessionId: { type: 'string' },
+            participants: { type: 'array', items: { type: 'string' } },
+            roles: { type: 'object' }
+          },
+          required: ['sessionId', 'participants', 'roles']
+        }
+      },
+      {
+        name: 'start_collaboration',
+        description: 'Transition a MACE collaboration session status to Executing state',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            sessionId: { type: 'string' }
+          },
+          required: ['sessionId']
+        }
+      },
+      {
+        name: 'pause_collaboration',
+        description: 'Pause execution transitions of an active MACE collaboration session',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            sessionId: { type: 'string' }
+          },
+          required: ['sessionId']
+        }
+      },
+      {
+        name: 'resume_collaboration',
+        description: 'Resume paused execution steps of a MACE collaboration session',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            sessionId: { type: 'string' }
+          },
+          required: ['sessionId']
+        }
+      },
+      {
+        name: 'cancel_collaboration',
+        description: 'Cancel and terminate a MACE collaboration session',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            sessionId: { type: 'string' }
+          },
+          required: ['sessionId']
+        }
+      },
+      {
+        name: 'collaboration_status',
+        description: 'Query state status and active checklist metrics of a MACE session',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            sessionId: { type: 'string' }
+          },
+          required: ['sessionId']
+        }
+      },
+      {
+        name: 'collaboration_sessions',
+        description: 'List active and completed MACE collaboration sessions records',
+        inputSchema: { type: 'object', properties: {} }
+      },
+      {
+        name: 'collaboration_artifacts',
+        description: 'Record a generated artifact path to the shared session registry store',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            sessionId: { type: 'string' },
+            artifactPath: { type: 'string' }
+          },
+          required: ['sessionId', 'artifactPath']
+        }
+      },
+      {
+        name: 'collaboration_votes',
+        description: 'Submit an expert consensus evaluation score vote on a session',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            sessionId: { type: 'string' },
+            voter: { type: 'string' },
+            score: { type: 'number' }
+          },
+          required: ['sessionId', 'voter', 'score']
+        }
+      },
+      {
+        name: 'collaboration_reviews',
+        description: 'Record peer review pass/fail verdict outputs on a target subtask',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            sessionId: { type: 'string' },
+            reviewer: { type: 'string' },
+            target: { type: 'string' },
+            passed: { type: 'boolean' }
+          },
+          required: ['sessionId', 'reviewer', 'target', 'passed']
+        }
+      },
+      {
+        name: 'collaboration_merge',
+        description: 'Trigger final voting consensus evaluations to merge workspace artifacts',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            sessionId: { type: 'string' }
+          },
+          required: ['sessionId']
+        }
       }
     ]
   };
@@ -5399,6 +5525,101 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         });
         return {
           content: [{ type: 'text', text: JSON.stringify({ title: 'UCCF Certification Report', date: new Date().toISOString(), scores }, null, 2) }]
+        };
+      }
+
+      case 'create_collaboration': {
+        const sid = args.sessionId as string;
+        const parts = args.participants as string[];
+        const r = args.roles as Record<string, string>;
+        const session = mace.createSession(sid, parts, r);
+        return {
+          content: [{ type: 'text', text: JSON.stringify(session, null, 2) }]
+        };
+      }
+
+      case 'start_collaboration': {
+        const sid = args.sessionId as string;
+        mace.startSession(sid);
+        return {
+          content: [{ type: 'text', text: JSON.stringify({ status: 'Executing', sessionId: sid }, null, 2) }]
+        };
+      }
+
+      case 'pause_collaboration': {
+        const sid = args.sessionId as string;
+        mace.pauseSession(sid);
+        return {
+          content: [{ type: 'text', text: JSON.stringify({ status: 'Paused', sessionId: sid }, null, 2) }]
+        };
+      }
+
+      case 'resume_collaboration': {
+        const sid = args.sessionId as string;
+        mace.resumeSession(sid);
+        return {
+          content: [{ type: 'text', text: JSON.stringify({ status: 'Executing', sessionId: sid }, null, 2) }]
+        };
+      }
+
+      case 'cancel_collaboration': {
+        const sid = args.sessionId as string;
+        mace.cancelSession(sid);
+        return {
+          content: [{ type: 'text', text: JSON.stringify({ status: 'Cancelled', sessionId: sid }, null, 2) }]
+        };
+      }
+
+      case 'collaboration_status': {
+        const sid = args.sessionId as string;
+        const s = mace.getSession(sid);
+        return {
+          content: [{ type: 'text', text: JSON.stringify(s || null, null, 2) }]
+        };
+      }
+
+      case 'collaboration_sessions': {
+        const list = mace.getSessionsList();
+        return {
+          content: [{ type: 'text', text: JSON.stringify(list, null, 2) }]
+        };
+      }
+
+      case 'collaboration_artifacts': {
+        const sid = args.sessionId as string;
+        const p = args.artifactPath as string;
+        mace.addArtifact(sid, p);
+        return {
+          content: [{ type: 'text', text: JSON.stringify({ status: 'ArtifactAdded', artifactPath: p }, null, 2) }]
+        };
+      }
+
+      case 'collaboration_votes': {
+        const sid = args.sessionId as string;
+        const voter = args.voter as string;
+        const score = args.score as number;
+        mace.submitVote(sid, voter, score);
+        return {
+          content: [{ type: 'text', text: JSON.stringify({ status: 'VoteRecorded', voter, score }, null, 2) }]
+        };
+      }
+
+      case 'collaboration_reviews': {
+        const sid = args.sessionId as string;
+        const reviewer = args.reviewer as string;
+        const target = args.target as string;
+        const passed = args.passed as boolean;
+        mace.submitReview(sid, reviewer, target, passed);
+        return {
+          content: [{ type: 'text', text: JSON.stringify({ status: 'ReviewRecorded', reviewer, passed }, null, 2) }]
+        };
+      }
+
+      case 'collaboration_merge': {
+        const sid = args.sessionId as string;
+        const res = mace.evaluateMerge(sid);
+        return {
+          content: [{ type: 'text', text: JSON.stringify(res, null, 2) }]
         };
       }
 
