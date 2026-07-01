@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as http from 'http';
 import express, { Express } from 'express';
+import cors from 'cors';
 import { EventBus, MemoryStorageProvider } from './eventBus';
 import { ObservabilityPlatform } from './observability';
 import { PlatformStateRegistry } from './stateRegistry';
@@ -133,6 +134,7 @@ export class PlatformBootstrap {
     this.publishLifecycle('BindingTransports');
 
     this.app = express();
+    this.app.use(cors());
     this.app.use(express.json());
 
     // GET /
