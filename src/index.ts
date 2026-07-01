@@ -8,8 +8,27 @@ import {
   McpError
 } from '@modelcontextprotocol/sdk/types.js';
 import express from 'express';
+import cors from 'cors';
+import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+
+// Load .env file before any config is read
+(function loadDotEnv() {
+  const envPath = path.join(process.cwd(), '.env');
+  if (fs.existsSync(envPath)) {
+    const content = fs.readFileSync(envPath, 'utf-8');
+    for (const line of content.split('\n')) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#')) continue;
+      const idx = trimmed.indexOf('=');
+      if (idx === -1) continue;
+      const key = trimmed.slice(0, idx).trim();
+      const val = trimmed.slice(idx + 1).trim().replace(/^['"]|['"]$/g, '');
+      if (!process.env[key]) process.env[key] = val;
+    }
+  }
+})();
 
 import { ShellType } from './types';
 import { loadConfiguration } from './config';
@@ -280,7 +299,7 @@ const server = new Server(
 );
 
 // 3. Register Tool List Handler
-server.setRequestHandler(ListToolsRequestSchema, async () => {
+const listToolsHandler = async () => {
   return {
     tools: [
       {
@@ -1467,7 +1486,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           properties: {
             layer: { type: 'string', enum: ['platform', 'environment', 'workspace', 'plugin', 'overrides'] },
             key: { type: 'string' },
-            value: { type: 'any' }
+            value: { description: 'The configuration value to set (any JSON value is allowed)' }
           },
           required: ['layer', 'key', 'value']
         }
@@ -1479,7 +1498,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           type: 'object',
           properties: {
             key: { type: 'string' },
-            value: { type: 'any' }
+            value: { description: 'The configuration value to validate (any JSON value is allowed)' }
           },
           required: ['key', 'value']
         }
@@ -3174,10 +3193,11 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       }
     ]
   };
-});
+};
+server.setRequestHandler(ListToolsRequestSchema, listToolsHandler);
 
 // 4. Register Tool Invocation Handler
-server.setRequestHandler(CallToolRequestSchema, async (request) => {
+const callToolHandler = async (request: any) => {
   const name = request.params.name;
   const args = request.params.arguments || {};
 
@@ -6426,7 +6446,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       isError: true
     };
   }
-});
+};
+server.setRequestHandler(CallToolRequestSchema, callToolHandler);
 
 // 5. Start Server with Correct Transport (Stdio or SSE via ngrok)
 async function run() {
@@ -6435,29 +6456,108 @@ async function run() {
   const port = config.ngrok.port;
 
   if (authtoken) {
-    // A. Start Express SSE Server
+    const { StreamableHTTPServerTransport } = await import('@modelcontextprotocol/sdk/server/streamableHttp.js');
+    const { randomUUID } = await import('crypto');
+
     const app = express();
+    app.use(cors());
     app.use(express.json());
 
+    // Bypass ngrok's browser interstitial for all programmatic requests
+    app.use((req, res, next) => {
+      res.setHeader('ngrok-skip-browser-warning', 'true');
+      next();
+    });
+
+    // Health check endpoint
+    app.get('/health', (req, res) => {
+      res.json({ status: 'ok', server: 'mcp-desktop-shell-server', version: '1.0.0' });
+    });
+
+    // ── Streamable HTTP Transport (what ChatGPT uses) ──
+    // Each session gets its own transport + server instance
+    const sessions: Record<string, { transport: InstanceType<typeof StreamableHTTPServerTransport>; server: Server }> = {};
+
+    app.all('/mcp', async (req, res) => {
+      // Handle GET for SSE stream and POST for JSON-RPC
+      const sessionId = req.headers['mcp-session-id'] as string | undefined;
+
+      if (req.method === 'GET' || req.method === 'DELETE') {
+        // GET = open SSE stream, DELETE = close session
+        if (sessionId && sessions[sessionId]) {
+          await sessions[sessionId].transport.handleRequest(req, res, req.body);
+          if (req.method === 'DELETE') {
+            await sessions[sessionId].server.close();
+            delete sessions[sessionId];
+            console.log(`Session ${sessionId} closed.`);
+          }
+        } else if (req.method === 'DELETE') {
+          res.status(404).send('Session not found');
+        } else {
+          // New GET without session - need initialization first
+          res.status(400).send('Session not initialized. Send POST with initialize first.');
+        }
+        return;
+      }
+
+      // POST requests
+      if (sessionId && sessions[sessionId]) {
+        // Existing session
+        await sessions[sessionId].transport.handleRequest(req, res, req.body);
+      } else {
+        // New session - create transport + server
+        const transport = new StreamableHTTPServerTransport({
+          sessionIdGenerator: () => randomUUID(),
+          onsessioninitialized: (newSid: string) => {
+            // Store the session once the transport has assigned an ID (during initialize)
+            sessions[newSid] = { transport, server: sessionServer };
+            console.log(`New Streamable HTTP session: ${newSid}`);
+          },
+        });
+
+        transport.onclose = () => {
+          const sid = transport.sessionId;
+          if (sid && sessions[sid]) {
+            delete sessions[sid];
+            console.log(`Streamable HTTP session closed: ${sid}`);
+          }
+        };
+
+        const sessionServer = new Server(
+          { name: 'mcp-desktop-shell-server', version: '1.0.0' },
+          { capabilities: { tools: {} } }
+        );
+
+        // Register the extracted standalone handlers directly
+        sessionServer.setRequestHandler(ListToolsRequestSchema, listToolsHandler);
+        sessionServer.setRequestHandler(CallToolRequestSchema, callToolHandler);
+
+        await sessionServer.connect(transport);
+        await transport.handleRequest(req, res, req.body);
+      }
+    });
+
+    // ── Legacy SSE Transport (backward compatibility) ──
     const transports: Record<string, SSEServerTransport> = {};
 
     app.get('/sse', async (req, res) => {
-      console.log('New SSE connection established.');
+      console.log('New legacy SSE connection established.');
       const transport = new SSEServerTransport('/messages', res);
-      const sessionId = transport.sessionId;
-      transports[sessionId] = transport;
+      const sid = transport.sessionId;
+      transports[sid] = transport;
 
       res.on('close', () => {
-        console.log(`SSE connection closed: ${sessionId}`);
-        delete transports[sessionId];
+        console.log(`Legacy SSE connection closed: ${sid}`);
+        delete transports[sid];
       });
 
+      try { await server.close(); } catch (_) {}
       await server.connect(transport);
     });
 
     app.post('/messages', async (req, res) => {
-      const sessionId = req.query.sessionId as string;
-      const transport = transports[sessionId];
+      const sid = req.query.sessionId as string;
+      const transport = transports[sid];
       if (transport) {
         await transport.handlePostMessage(req, res);
       } else {
@@ -6467,12 +6567,14 @@ async function run() {
 
     const httpServer = app.listen(port, () => {
       console.log(`Local HTTP server listening on port ${port}`);
+      console.log(`MCP Streamable HTTP: http://localhost:${port}/mcp`);
+      console.log(`MCP Legacy SSE:      http://localhost:${port}/sse`);
     });
 
     // B. Expose Server via ngrok
     try {
       const tunnel = await startNgrokTunnel(port, authtoken, domain);
-      
+
       // Cleanup on shutdown
       process.on('SIGINT', async () => {
         await tunnel.stop();

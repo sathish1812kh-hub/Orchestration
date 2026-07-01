@@ -5,3 +5,7 @@ audit_log.jsonl
 .git/
 .env
 .env.local
+event_store.jsonl
+terminal_registry.json
+scratch/
+
