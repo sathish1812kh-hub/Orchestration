@@ -71,6 +71,12 @@ import {
   validateOpenaiVersion,
   discoverOpenaiCliPath
 } from './openaiProfile';
+import {
+  QWEN_CLI_PROFILE,
+  negotiateQwenCapabilities,
+  validateQwenVersion,
+  discoverQwenCliPath
+} from './qwenProfile';
 
 // 1. Initialize Components
 const config = loadConfiguration();
@@ -146,6 +152,8 @@ const codexConnector = new GenericCliAiConnector(eventBus, observability);
 const geminiConnector = new GenericCliAiConnector(eventBus, observability);
 
 const openaiConnector = new GenericCliAiConnector(eventBus, observability);
+
+const qwenConnector = new GenericCliAiConnector(eventBus, observability);
 
 const pdk = new ProfileDevelopmentKit();
 
@@ -2502,6 +2510,69 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       {
         name: 'openai_recover',
         description: 'Trigger failover recovery procedures on disconnected OpenAI sessions',
+        inputSchema: { type: 'object', properties: {} }
+      },
+      {
+        name: 'qwen_connect',
+        description: 'Initialize and start Qwen CLI connection session',
+        inputSchema: { type: 'object', properties: {} }
+      },
+      {
+        name: 'qwen_disconnect',
+        description: 'Shutdown active Qwen CLI connection session',
+        inputSchema: { type: 'object', properties: {} }
+      },
+      {
+        name: 'qwen_execute',
+        description: 'Execute prompt request against Qwen CLI session',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            prompt: { type: 'string' }
+          },
+          required: ['prompt']
+        }
+      },
+      {
+        name: 'qwen_status',
+        description: 'Query connection logs and active state metrics of Qwen session',
+        inputSchema: { type: 'object', properties: {} }
+      },
+      {
+        name: 'qwen_sessions',
+        description: 'List active PIDs and tracking metrics of all Qwen sessions',
+        inputSchema: { type: 'object', properties: {} }
+      },
+      {
+        name: 'qwen_capabilities',
+        description: 'Dynamically negotiate Qwen capability lists based on version number limits',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            versionString: { type: 'string' }
+          },
+          required: ['versionString']
+        }
+      },
+      {
+        name: 'qwen_profile_status',
+        description: 'Query discovery paths and loaded statuses for the Qwen Profile',
+        inputSchema: { type: 'object', properties: {} }
+      },
+      {
+        name: 'qwen_validate',
+        description: 'Run compatibility checks and version validations on Qwen configuration',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            profilePath: { type: 'string' }
+          },
+          required: ['profilePath']
+        }
+      },
+      {
+        name: 'qwen_recover',
+        description: 'Trigger failover recovery procedures on disconnected Qwen sessions',
         inputSchema: { type: 'object', properties: {} }
       }
     ]
@@ -5127,6 +5198,92 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case 'openai_recover': {
         const recovered = openaiConnector.getPid() !== undefined;
+        return {
+          content: [{ type: 'text', text: JSON.stringify({ status: 'Recovered', active: recovered }, null, 2) }]
+        };
+      }
+
+      case 'qwen_connect': {
+        await qwenConnector.initializeGcac(QWEN_CLI_PROFILE, config.workspaceRoots[0] || process.cwd());
+        const pid = await qwenConnector.start();
+        return {
+          content: [{ type: 'text', text: JSON.stringify({ pid, status: 'Connected' }, null, 2) }]
+        };
+      }
+
+      case 'qwen_disconnect': {
+        await qwenConnector.shutdown();
+        return {
+          content: [{ type: 'text', text: JSON.stringify({ status: 'Disconnected' }, null, 2) }]
+        };
+      }
+
+      case 'qwen_execute': {
+        const prompt = args.prompt as string;
+        const out = await qwenConnector.execute(prompt, () => {});
+        return {
+          content: [{ type: 'text', text: out }]
+        };
+      }
+
+      case 'qwen_status': {
+        const active = qwenConnector.getPid() !== undefined;
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              status: active ? 'Connected' : 'Disconnected',
+              sessionId: qwenConnector.getSessionId() || 'none',
+              metrics: qwenConnector.getMetrics()
+            }, null, 2)
+          }]
+        };
+      }
+
+      case 'qwen_sessions': {
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify([{
+              name: 'qwen-cli',
+              pid: qwenConnector.getPid() || null,
+              sessionId: qwenConnector.getSessionId() || 'none'
+            }], null, 2)
+          }]
+        };
+      }
+
+      case 'qwen_capabilities': {
+        const ver = args.versionString as string;
+        const caps = negotiateQwenCapabilities(ver);
+        return {
+          content: [{ type: 'text', text: JSON.stringify(caps, null, 2) }]
+        };
+      }
+
+      case 'qwen_profile_status': {
+        const pathFound = discoverQwenCliPath();
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              loaded: qwenConnector.getProfile()?.name === 'qwen-cli',
+              discoveredPath: pathFound,
+              isCompatible: true
+            }, null, 2)
+          }]
+        };
+      }
+
+      case 'qwen_validate': {
+        const valid = discoverQwenCliPath().length > 0;
+        return {
+          content: [{ type: 'text', text: JSON.stringify({ valid }, null, 2) }]
+        };
+      }
+
+      case 'qwen_recover': {
+        const recovered = qwenConnector.getPid() !== undefined;
         return {
           content: [{ type: 'text', text: JSON.stringify({ status: 'Recovered', active: recovered }, null, 2) }]
         };
