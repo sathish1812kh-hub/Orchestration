@@ -69,6 +69,35 @@ export class CapabilityGateway {
   }
 }
 
+export function isProtectedPath(targetPath: string): boolean {
+  const resolved = path.resolve(targetPath).toLowerCase();
+  const protectedPrefixes = [
+    'c:\\windows',
+    'c:\\program files',
+    'c:\\program files (x86)'
+  ];
+  return protectedPrefixes.some(prefix => 
+    resolved === prefix || resolved.startsWith(prefix + path.sep)
+  );
+}
+
+export function resolvePluginDirectory(): string {
+  if (process.env.PLUGIN_DIRECTORY) {
+    return path.resolve(process.env.PLUGIN_DIRECTORY);
+  }
+
+  if (process.env.LOCALAPPDATA) {
+    return path.join(process.env.LOCALAPPDATA, 'NGROK-MCP', 'plugins');
+  }
+
+  const homeDir = process.env.HOME || process.env.USERPROFILE;
+  if (homeDir) {
+    return path.join(homeDir, '.local', 'share', 'NGROK-MCP', 'plugins');
+  }
+
+  return path.join(__dirname, '..', 'plugins');
+}
+
 export class PluginFramework {
   private eventBus: EventBus;
   private terminalManager: TerminalManager;
@@ -80,7 +109,8 @@ export class PluginFramework {
   private auditLogger: AuditLogger;
 
   private registry = new Map<string, PluginState>();
-  private pluginsDir: string;
+  private pluginsDir: string = '';
+  private enabled: boolean = true;
 
   constructor(
     eventBus: EventBus,
@@ -91,7 +121,7 @@ export class PluginFramework {
     orchestrator: AutonomousOrchestrator,
     policyEngine: PolicyEngine,
     auditLogger: AuditLogger,
-    pluginsDir: string
+    pluginsDir?: string
   ) {
     this.eventBus = eventBus;
     this.terminalManager = terminalManager;
@@ -101,10 +131,41 @@ export class PluginFramework {
     this.orchestrator = orchestrator;
     this.policyEngine = policyEngine;
     this.auditLogger = auditLogger;
-    this.pluginsDir = pluginsDir;
 
-    if (!fs.existsSync(pluginsDir)) {
-      fs.mkdirSync(pluginsDir, { recursive: true });
+    let targetDir = '';
+    try {
+      if (process.env.PLUGIN_DIRECTORY) {
+        targetDir = path.resolve(process.env.PLUGIN_DIRECTORY);
+      } else if (pluginsDir && !pluginsDir.includes('System32') && !isProtectedPath(pluginsDir)) {
+        targetDir = path.resolve(pluginsDir);
+      } else {
+        targetDir = resolvePluginDirectory();
+      }
+
+      console.error(`Plugin directory:\n\nResolved path:\n${targetDir}`);
+
+      if (isProtectedPath(targetDir)) {
+        throw new Error(`PermissionDenied: Path "${targetDir}" is a protected Windows system directory.`);
+      }
+
+      // Safe creation block
+      if (!fs.existsSync(targetDir)) {
+        fs.mkdirSync(targetDir, { recursive: true });
+      }
+
+      // Check write permissions
+      const testFile = path.join(targetDir, `.write_test_${Math.random()}`);
+      fs.writeFileSync(testFile, 'test');
+      fs.unlinkSync(testFile);
+
+      this.pluginsDir = targetDir;
+      console.error('Writable:\ntrue\n');
+    } catch (err: any) {
+      console.error('Writable:\nfalse\n');
+      console.error('Plugin Framework failed to initialize:', err.message);
+      console.error('Disabling Plugin Framework... MCP server will continue starting.');
+      this.enabled = false;
+      this.pluginsDir = '';
     }
   }
 
