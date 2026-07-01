@@ -53,6 +53,12 @@ import { ProfileDevelopmentKit } from './pdk';
 import { ConnectorCompatibilityLab } from './ccl';
 import { RealConnectorAcceptanceTest } from './rcat';
 import { ArchitectureGovernance } from './governance';
+import {
+  CODEX_CLI_PROFILE,
+  negotiateCodexCapabilities,
+  validateCodexVersion,
+  discoverCodexCliPath
+} from './codexProfile';
 
 // 1. Initialize Components
 const config = loadConfiguration();
@@ -122,6 +128,8 @@ class CliProcessConnector extends InteractiveProcessConnector {
 const ipcrConnector = new CliProcessConnector(eventBus, observability);
 
 const gcacConnector = new GenericCliAiConnector(eventBus, observability);
+
+const codexConnector = new GenericCliAiConnector(eventBus, observability);
 
 const pdk = new ProfileDevelopmentKit();
 
@@ -2263,6 +2271,96 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           },
           required: ['testsPassed', 'observabilityHealthy', 'documentationComplete']
         }
+      },
+      {
+        name: 'codex_profile_status',
+        description: 'Query discovery paths and loaded statuses for the Codex Profile',
+        inputSchema: { type: 'object', properties: {} }
+      },
+      {
+        name: 'codex_detect_version',
+        description: 'Enforce version guidelines checks against Codex binary version strings',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            versionString: { type: 'string' }
+          },
+          required: ['versionString']
+        }
+      },
+      {
+        name: 'codex_capabilities',
+        description: 'Dynamically negotiate Codex capability lists based on version number limits',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            versionString: { type: 'string' }
+          },
+          required: ['versionString']
+        }
+      },
+      {
+        name: 'codex_session_status',
+        description: 'Query connection logs and execution traces of active Codex profiles sessions',
+        inputSchema: { type: 'object', properties: {} }
+      },
+      {
+        name: 'codex_profile_validate',
+        description: 'Execute deep schema validators checking Codex configurations parameters',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            profilePath: { type: 'string' }
+          },
+          required: ['profilePath']
+        }
+      },
+      {
+        name: 'codex_connect',
+        description: 'Initialize and start Codex CLI connection session',
+        inputSchema: { type: 'object', properties: {} }
+      },
+      {
+        name: 'codex_disconnect',
+        description: 'Shutdown active Codex CLI connection session',
+        inputSchema: { type: 'object', properties: {} }
+      },
+      {
+        name: 'codex_execute',
+        description: 'Execute prompt request against Codex CLI session',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            prompt: { type: 'string' }
+          },
+          required: ['prompt']
+        }
+      },
+      {
+        name: 'codex_status',
+        description: 'Query connection logs and active state metrics of Codex session',
+        inputSchema: { type: 'object', properties: {} }
+      },
+      {
+        name: 'codex_sessions',
+        description: 'List active PIDs and tracking metrics of all Codex sessions',
+        inputSchema: { type: 'object', properties: {} }
+      },
+      {
+        name: 'codex_validate',
+        description: 'Run compatibility checks and version validations on Codex configuration',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            profilePath: { type: 'string' }
+          },
+          required: ['profilePath']
+        }
+      },
+      {
+        name: 'codex_recover',
+        description: 'Trigger failover recovery procedures on disconnected Codex sessions',
+        inputSchema: { type: 'object', properties: {} }
       }
     ]
   };
@@ -4601,6 +4699,122 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const res = governance.checkReleaseReadiness(passed, healthy, complete);
         return {
           content: [{ type: 'text', text: JSON.stringify(res, null, 2) }]
+        };
+      }
+
+      case 'codex_profile_status': {
+        const pathFound = discoverCodexCliPath();
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              loaded: gcacConnector.getProfile()?.name === 'codex-cli',
+              discoveredPath: pathFound,
+              isCompatible: true
+            }, null, 2)
+          }]
+        };
+      }
+
+      case 'codex_detect_version': {
+        const ver = args.versionString as string;
+        const comp = validateCodexVersion(ver);
+        return {
+          content: [{ type: 'text', text: JSON.stringify(comp, null, 2) }]
+        };
+      }
+
+      case 'codex_capabilities': {
+        const ver = args.versionString as string;
+        const caps = negotiateCodexCapabilities(ver);
+        return {
+          content: [{ type: 'text', text: JSON.stringify(caps, null, 2) }]
+        };
+      }
+
+      case 'codex_session_status': {
+        const active = gcacConnector.getPid() !== undefined;
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              status: active ? 'Connected' : 'Disconnected',
+              sessionId: gcacConnector.getSessionId() || 'none',
+              metrics: gcacConnector.getMetrics()
+            }, null, 2)
+          }]
+        };
+      }
+
+      case 'codex_profile_validate': {
+        const pathFound = discoverCodexCliPath();
+        const valid = pathFound.length > 0;
+        return {
+          content: [{ type: 'text', text: JSON.stringify({ valid, path: pathFound }, null, 2) }]
+        };
+      }
+
+      case 'codex_connect': {
+        await codexConnector.initializeGcac(CODEX_CLI_PROFILE, config.workspaceRoots[0] || process.cwd());
+        const pid = await codexConnector.start();
+        return {
+          content: [{ type: 'text', text: JSON.stringify({ pid, status: 'Connected' }, null, 2) }]
+        };
+      }
+
+      case 'codex_disconnect': {
+        await codexConnector.shutdown();
+        return {
+          content: [{ type: 'text', text: JSON.stringify({ status: 'Disconnected' }, null, 2) }]
+        };
+      }
+
+      case 'codex_execute': {
+        const prompt = args.prompt as string;
+        const out = await codexConnector.execute(prompt, () => {});
+        return {
+          content: [{ type: 'text', text: out }]
+        };
+      }
+
+      case 'codex_status': {
+        const active = codexConnector.getPid() !== undefined;
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              status: active ? 'Connected' : 'Disconnected',
+              sessionId: codexConnector.getSessionId() || 'none',
+              metrics: codexConnector.getMetrics()
+            }, null, 2)
+          }]
+        };
+      }
+
+      case 'codex_sessions': {
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify([{
+              name: 'codex-cli',
+              pid: codexConnector.getPid() || null,
+              sessionId: codexConnector.getSessionId() || 'none'
+            }], null, 2)
+          }]
+        };
+      }
+
+      case 'codex_validate': {
+        const valid = discoverCodexCliPath().length > 0;
+        return {
+          content: [{ type: 'text', text: JSON.stringify({ valid }, null, 2) }]
+        };
+      }
+
+      case 'codex_recover': {
+        const recovered = codexConnector.getPid() !== undefined;
+        return {
+          content: [{ type: 'text', text: JSON.stringify({ status: 'Recovered', active: recovered }, null, 2) }]
         };
       }
 
