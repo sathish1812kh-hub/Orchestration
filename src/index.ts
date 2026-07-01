@@ -6454,8 +6454,9 @@ async function run() {
   const authtoken = config.ngrok.authtoken;
   const domain = config.ngrok.domain;
   const port = config.ngrok.port;
+  const forceStdio = process.argv.includes('--stdio');
 
-  if (authtoken) {
+  if (authtoken && !forceStdio) {
     const { StreamableHTTPServerTransport } = await import('@modelcontextprotocol/sdk/server/streamableHttp.js');
     const { randomUUID } = await import('crypto');
 
