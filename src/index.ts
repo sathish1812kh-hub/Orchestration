@@ -59,6 +59,12 @@ import {
   validateCodexVersion,
   discoverCodexCliPath
 } from './codexProfile';
+import {
+  GEMINI_CLI_PROFILE,
+  negotiateGeminiCapabilities,
+  validateGeminiVersion,
+  discoverGeminiCliPath
+} from './geminiProfile';
 
 // 1. Initialize Components
 const config = loadConfiguration();
@@ -130,6 +136,8 @@ const ipcrConnector = new CliProcessConnector(eventBus, observability);
 const gcacConnector = new GenericCliAiConnector(eventBus, observability);
 
 const codexConnector = new GenericCliAiConnector(eventBus, observability);
+
+const geminiConnector = new GenericCliAiConnector(eventBus, observability);
 
 const pdk = new ProfileDevelopmentKit();
 
@@ -2360,6 +2368,69 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       {
         name: 'codex_recover',
         description: 'Trigger failover recovery procedures on disconnected Codex sessions',
+        inputSchema: { type: 'object', properties: {} }
+      },
+      {
+        name: 'gemini_connect',
+        description: 'Initialize and start Gemini CLI connection session',
+        inputSchema: { type: 'object', properties: {} }
+      },
+      {
+        name: 'gemini_disconnect',
+        description: 'Shutdown active Gemini CLI connection session',
+        inputSchema: { type: 'object', properties: {} }
+      },
+      {
+        name: 'gemini_execute',
+        description: 'Execute prompt request against Gemini CLI session',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            prompt: { type: 'string' }
+          },
+          required: ['prompt']
+        }
+      },
+      {
+        name: 'gemini_status',
+        description: 'Query connection logs and active state metrics of Gemini session',
+        inputSchema: { type: 'object', properties: {} }
+      },
+      {
+        name: 'gemini_sessions',
+        description: 'List active PIDs and tracking metrics of all Gemini sessions',
+        inputSchema: { type: 'object', properties: {} }
+      },
+      {
+        name: 'gemini_capabilities',
+        description: 'Dynamically negotiate Gemini capability lists based on version number limits',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            versionString: { type: 'string' }
+          },
+          required: ['versionString']
+        }
+      },
+      {
+        name: 'gemini_profile_status',
+        description: 'Query discovery paths and loaded statuses for the Gemini Profile',
+        inputSchema: { type: 'object', properties: {} }
+      },
+      {
+        name: 'gemini_validate',
+        description: 'Run compatibility checks and version validations on Gemini configuration',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            profilePath: { type: 'string' }
+          },
+          required: ['profilePath']
+        }
+      },
+      {
+        name: 'gemini_recover',
+        description: 'Trigger failover recovery procedures on disconnected Gemini sessions',
         inputSchema: { type: 'object', properties: {} }
       }
     ]
@@ -4813,6 +4884,92 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case 'codex_recover': {
         const recovered = codexConnector.getPid() !== undefined;
+        return {
+          content: [{ type: 'text', text: JSON.stringify({ status: 'Recovered', active: recovered }, null, 2) }]
+        };
+      }
+
+      case 'gemini_connect': {
+        await geminiConnector.initializeGcac(GEMINI_CLI_PROFILE, config.workspaceRoots[0] || process.cwd());
+        const pid = await geminiConnector.start();
+        return {
+          content: [{ type: 'text', text: JSON.stringify({ pid, status: 'Connected' }, null, 2) }]
+        };
+      }
+
+      case 'gemini_disconnect': {
+        await geminiConnector.shutdown();
+        return {
+          content: [{ type: 'text', text: JSON.stringify({ status: 'Disconnected' }, null, 2) }]
+        };
+      }
+
+      case 'gemini_execute': {
+        const prompt = args.prompt as string;
+        const out = await geminiConnector.execute(prompt, () => {});
+        return {
+          content: [{ type: 'text', text: out }]
+        };
+      }
+
+      case 'gemini_status': {
+        const active = geminiConnector.getPid() !== undefined;
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              status: active ? 'Connected' : 'Disconnected',
+              sessionId: geminiConnector.getSessionId() || 'none',
+              metrics: geminiConnector.getMetrics()
+            }, null, 2)
+          }]
+        };
+      }
+
+      case 'gemini_sessions': {
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify([{
+              name: 'gemini-cli',
+              pid: geminiConnector.getPid() || null,
+              sessionId: geminiConnector.getSessionId() || 'none'
+            }], null, 2)
+          }]
+        };
+      }
+
+      case 'gemini_capabilities': {
+        const ver = args.versionString as string;
+        const caps = negotiateGeminiCapabilities(ver);
+        return {
+          content: [{ type: 'text', text: JSON.stringify(caps, null, 2) }]
+        };
+      }
+
+      case 'gemini_profile_status': {
+        const pathFound = discoverGeminiCliPath();
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              loaded: geminiConnector.getProfile()?.name === 'gemini-cli',
+              discoveredPath: pathFound,
+              isCompatible: true
+            }, null, 2)
+          }]
+        };
+      }
+
+      case 'gemini_validate': {
+        const valid = discoverGeminiCliPath().length > 0;
+        return {
+          content: [{ type: 'text', text: JSON.stringify({ valid }, null, 2) }]
+        };
+      }
+
+      case 'gemini_recover': {
+        const recovered = geminiConnector.getPid() !== undefined;
         return {
           content: [{ type: 'text', text: JSON.stringify({ status: 'Recovered', active: recovered }, null, 2) }]
         };
