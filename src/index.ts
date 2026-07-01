@@ -102,6 +102,9 @@ import { DmaeClusterManager } from './dmae';
 import { DcmsContextCoordinator } from './dcms';
 import { CloudExecutionGateway } from './cegrf';
 import { PlatformBootstrap } from './bootstrap';
+import { filesystemToolSchemas, handleFilesystemTool, TrustedRootManager, FilesystemIndexer } from './trustedFilesystem';
+import { gitToolSchemas, handleGitTool } from './gitIntelligence';
+import { codeToolSchemas, handleCodeTool } from './codeIntelligence';
 
 // 1. Initialize Components
 const config = loadConfiguration();
@@ -110,6 +113,10 @@ const policyEngine = new PolicyEngine(config);
 // We'll use the first workspace root as the primary logger root
 const primaryRoot = config.workspaceRoots[0] || process.cwd();
 const auditLogger = new AuditLogger(primaryRoot);
+
+const trustedRootManager = new TrustedRootManager(auditLogger);
+const filesystemIndexer = new FilesystemIndexer(primaryRoot);
+filesystemIndexer.startIndexingBackground();
 
 const sessionRegistry = new SessionRegistry(primaryRoot);
 const terminalManager = new TerminalManager(primaryRoot, policyEngine, auditLogger);
@@ -3190,7 +3197,10 @@ const listToolsHandler = async () => {
         name: 'runtime_shutdown',
         description: 'Gracefully shutdown the entire local process framework',
         inputSchema: { type: 'object', properties: {} }
-      }
+      },
+      ...filesystemToolSchemas,
+      ...gitToolSchemas,
+      ...codeToolSchemas
     ]
   };
 };
@@ -3202,6 +3212,27 @@ const callToolHandler = async (request: any) => {
   const args = request.params.arguments || {};
 
   try {
+    if (name.startsWith('filesystem_')) {
+      const result = await handleFilesystemTool(trustedRootManager, filesystemIndexer, name, args, auditLogger);
+      return {
+        content: [{ type: 'text', text: JSON.stringify(result, null, 2) }]
+      };
+    }
+
+    if (name.startsWith('git_')) {
+      const result = await handleGitTool(name, args, auditLogger);
+      return {
+        content: [{ type: 'text', text: JSON.stringify(result, null, 2) }]
+      };
+    }
+
+    if (name.startsWith('code_') || name.startsWith('workspace_')) {
+      const result = await handleCodeTool(name, args, auditLogger);
+      return {
+        content: [{ type: 'text', text: JSON.stringify(result, null, 2) }]
+      };
+    }
+
     switch (name) {
       case 'terminal_execute': {
         const cmd = args.command as string;
